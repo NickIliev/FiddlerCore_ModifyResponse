@@ -1,12 +1,16 @@
 ﻿using System;
 using System.Text;
 using System.Threading.Tasks;
+using System.Windows.Forms;
 using Fiddler;
+using Telerik.NetworkConnections;
+using Telerik.NetworkConnections.Windows;
 
 namespace FiddlerCore_ModifyResponse
 {
     class Program
     {
+        [Obsolete]
         static async Task Main(string[] args)
         {
             // If you want to use CertEnroll instead of BouncyCastle, remove the BCMakeCert and CertMaker references
@@ -22,42 +26,61 @@ namespace FiddlerCore_ModifyResponse
             // Custom cert provider can be used.
             BCCertMaker.BCCertMaker certProvider = new BCCertMaker.BCCertMaker();
             CertMaker.oCertProvider = certProvider;
-            FiddlerApplication.ResponseHeadersAvailable += FiddlerApplication_ResponseHeadersAvailable;
 
+
+            Console.WriteLine("rootCertExists: " + CertMaker.rootCertExists());
+            Console.WriteLine("rootCertIsTrusted: " + CertMaker.rootCertIsTrusted());
+
+            if (!CertMaker.rootCertExists() || !CertMaker.rootCertIsTrusted())
+            {
+                if (!CertMaker.rootCertExists())
+                    if (!CertMaker.createRootCert())
+                    {
+                        Console.WriteLine("Unable to create cert for FiddlerCore.");
+                        return;
+                    }
+
+                if (!CertMaker.rootCertIsTrusted())
+                    if (!CertMaker.trustRootCert())
+                    {
+                        Console.WriteLine("Unable to install FiddlerCore's cert.");
+                        return;
+                    }
+            }
+
+            Fiddler.FiddlerApplication.ResponseHeadersAvailable += FiddlerApplication_ResponseHeadersAvailable;
+            Fiddler.FiddlerApplication.BeforeRequest += FiddlerApp_BeforeRequest;
             Fiddler.FiddlerApplication.BeforeResponse += FiddlerApplication_BeforeResponse;
             Fiddler.FiddlerApplication.AfterSessionComplete += FiddlerApplication_AfterSessionComplete;
-
-            if (!CertMaker.createRootCert())
-            {
-                Console.WriteLine("Unable to create cert for FiddlerCore.");
-                return;
-            }
-
-            if (!CertMaker.trustRootCert())
-            {
-                Console.WriteLine("Unable to install FiddlerCore's cert.");
-                return;
-            }
+            Fiddler.FiddlerApplication.OnWebSocketMessage += _OnWebSocketMessage;
 
             FiddlerCoreStartupSettings startupSettings =
                                             new FiddlerCoreStartupSettingsBuilder()
                                                 .ListenOnPort(8887)
                                                 .DecryptSSL()
                                                 .RegisterAsSystemProxy()
+                                                //.SetUpstreamGatewayTo("127.0.0.1:8866") // optional - do not use if there is no such upstream proxy
                                                 .Build();
 
 
             FiddlerApplication.Startup(startupSettings);
-            Console.WriteLine("\nPROXY IS NOW SET, open https://yahoo.com in your browser");
+            Console.WriteLine("\nPROXY IS NOW SET, open https://example.com in your browser");
             Console.WriteLine("To remove the proxy and close the app, press Enter");
 
             Console.ReadLine();
             FiddlerApplication.Shutdown();
         }
 
+        private static void FiddlerApp_BeforeRequest(Session oSession)
+        {
+            //oSession["X-OverrideGateway"] = "127.0.0.1:8866"; // another way to explicitly modify a session to use a gateway proxy
+        }
+
 
         private static void FiddlerApplication_BeforeResponse(Session oSession)
         {
+
+            Console.WriteLine("####### {0}", oSession.url);
 
             if (oSession.fullUrl.Contains("httpbin.org/status/404") && oSession.responseCode == 404)
             {
@@ -67,8 +90,9 @@ namespace FiddlerCore_ModifyResponse
             }
 
  
-            if (oSession.fullUrl.Contains("yahoo.com") && oSession.HTTPMethodIs("GET"))
+            if (oSession.fullUrl.Contains("example.com") && oSession.HTTPMethodIs("GET"))
             {
+
                 oSession.bBufferResponse = true;
                 oSession.utilDecodeResponse();
 
@@ -96,7 +120,8 @@ namespace FiddlerCore_ModifyResponse
         private static void FiddlerApplication_ResponseHeadersAvailable(Session oSession)
         {
 
-            if (oSession.fullUrl.Contains("yahoo.com"))
+            if (oSession.fullUrl.Contains("example.com"))
+
             {
                 // Set this to true, so in BeforeResponse you'll be able to modify the the body.
                 // If the value is false (default one), the response that you'll work with in the BeforeResponse handler
@@ -104,6 +129,13 @@ namespace FiddlerCore_ModifyResponse
                 // will not be visible there.
                 oSession.bBufferResponse = true;
             }
+        }
+
+        private static void _OnWebSocketMessage(Object sender, WebSocketMessageEventArgs e)
+        {
+            //var payload = e.oWSM.PayloadAsString();
+            //Console.WriteLine("WS >>>>>>>>>>>>>>>>>>>>>");
+            //Console.WriteLine(payload);
         }
     }
 }
